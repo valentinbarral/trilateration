@@ -19,6 +19,7 @@
   <author email="lionel.geneve@gmail.fr">Lionel GENEVE</author>
 
   <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>gtec_msgs</build_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>nav_msgs</build_depend>
   <build_depend>visualization_msgs</build_depend>

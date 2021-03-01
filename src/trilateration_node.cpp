@@ -1,25 +1,28 @@
 #include "ros/ros.h"
-#include "geometry_msgs/PointStamped.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "nav_msgs/Odometry.h"
 #include "visualization_msgs/Marker.h"
 
 #include <iostream>
 #include <fstream>
+#include <unordered_map>
+
 
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
-/// Custom range measurement messages
-#include "lawnmower/BeaconRangeMsg.h"
+#include <gtec_msgs/Ranging.h>
+#include <visualization_msgs/MarkerArray.h>
 
 #include "trilateration.h"
 
 #define DIM						(2)
 #define GLOBAL_FRAME_NAME		"map"
 #define ODOM_FRAME_NAME			"odom"
-#define RANGE_TOPIC_NAME		"/lawnmower/beacon_ranges"
-#define POSITION_TOPIC_NAME		"trilat_position"
+#define RANGE_TOPIC_NAME		"/gtec/toa/ranging"
+#define ANCHORS_TOPIC_NAME		"/gtec/toa/anchors"
+#define POSITION_TOPIC_NAME		"/gtec/trilateration/"
 #define ODOM_TOPIC_NAME			"trilat_odom"
 #define MARKER_TOPIC_NAME		"trilat_marker"
 #define LOOP_RATE				(10.0f)
@@ -30,23 +33,56 @@
 
 using namespace std;
 
+#define MAX_NUM_ANCS (64)
 /// Global variables
-vector<lawnmower::BeaconRangeMsg> beaconRanges;
+vector<gtec_msgs::Ranging> beaconRanges;
+vector<gtec_msgs::Ranging> lastRanges;
+
 bool new_ranges = false;
+bool anchorsSet = false;
+int current_seq = 0;
 
+typedef struct
+{
+    double x, y, z;
+    uint64_t id;
+    std::string label;
+} anc_struct_t;
 
-void rangeCallback(const lawnmower::BeaconRangeMsg& _msg) {
-	uint8_t i = 0;
-	for (i=0;i<beaconRanges.size();i++) {
-		if (beaconRanges[i].id.data == _msg.id.data)
-			break;
-	}
-	if (i >= beaconRanges.size()) {
-		beaconRanges.push_back(_msg);
+anc_struct_t _ancArray[MAX_NUM_ANCS];
+
+unordered_map<int, anc_struct_t> _anchorById;
+
+void rangeCallback(const gtec_msgs::Ranging& _msg) {
+	if (_msg.seq!=current_seq) {
+		beaconRanges.insert(beaconRanges.end(), lastRanges.begin(), lastRanges.end());
+		lastRanges.clear();
 		new_ranges = true;
-	}
+	} 
+	
+	lastRanges.push_back(_msg);
 }
 
+void newAnchorsMarkerArray(const visualization_msgs::MarkerArray::ConstPtr& anchorsMarkerArray){
+
+  if (!anchorsSet){
+    for (int i = 0; i < anchorsMarkerArray->markers.size(); ++i)
+    {
+      visualization_msgs::Marker marker = anchorsMarkerArray->markers[i];
+		anc_struct_t anAnchor;
+      anAnchor.id = marker.id;
+      anAnchor.label = "";
+      anAnchor.x = marker.pose.position.x;
+      anAnchor.y = marker.pose.position.y;
+      anAnchor.z = marker.pose.position.z;
+	  _anchorById[anAnchor.id] = anAnchor;
+	  ROS_INFO("Anchors: %d [%d]  (%f, %f, %f)", i, (int) anAnchor.id ,  anAnchor.x, anAnchor.y, anAnchor.z);
+    }
+    anchorsSet = true;
+    ROS_INFO("Anchors set");
+  }
+  
+}
 
 int main(int argc, char** argv) {
 	unsigned int nbRanges = 0;
@@ -60,8 +96,11 @@ int main(int argc, char** argv) {
 	string odom_topic_name;
 	string odom_frame_name;
 	string marker_topic_name;
+	string anchors_topic_name;
 	new_ranges = false;
+	anchorsSet = false;
 	beaconRanges.clear();
+	lastRanges.clear();
 	vector<float> bx, by, bz;
 	vector<float> stds, biases, scales, etas, ids;
 	bool first_position = true;
@@ -81,8 +120,9 @@ int main(int argc, char** argv) {
 	ros::Publisher pub_marker;
 	/// ROS Subscribers
 	ros::Subscriber sub_beaconRanges;
+	ros::Subscriber sub_anchorPositions;
 	/// ROS Messages
-	geometry_msgs::PointStamped ptStamped;
+	geometry_msgs::PoseWithCovarianceStamped ptStamped;
 	nav_msgs::Odometry odom_msg;
 	visualization_msgs::Marker marker_msg;
 
@@ -98,6 +138,8 @@ int main(int argc, char** argv) {
 		range_topic_name = RANGE_TOPIC_NAME;
 	if (!nh.getParam ("position_topic_name", position_topic_name))
 		position_topic_name = POSITION_TOPIC_NAME;
+	if (!nh.getParam ("anchors_topic_name", anchors_topic_name))
+		anchors_topic_name = ANCHORS_TOPIC_NAME;
 	if (!nh.getParam ("odom_topic_name", odom_topic_name))
 		odom_topic_name = ODOM_TOPIC_NAME;
 	if (!nh.getParam ("marker_topic_name", marker_topic_name))
@@ -131,8 +173,9 @@ int main(int argc, char** argv) {
 	ros::Rate loop_rate(loopRate);
 	/// ROS topic subscribers
 	sub_beaconRanges = nh.subscribe(range_topic_name, 10, rangeCallback);
+	sub_anchorPositions = nh.subscribe(anchors_topic_name, 10, newAnchorsMarkerArray);
 	/// ROS topic publishers
-	pub_ptStamped = nh.advertise<geometry_msgs::PointStamped>(position_topic_name, loopRate);
+	pub_ptStamped = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>(position_topic_name, loopRate);
 	pub_odom = nh.advertise<nav_msgs::Odometry>(odom_topic_name, loopRate);
 	pub_marker = nh.advertise<visualization_msgs::Marker>(marker_topic_name, loopRate);
 
@@ -169,7 +212,7 @@ int main(int argc, char** argv) {
 	Eigen::VectorXf y, w, x(dim);
 
 	while (ros::ok()) {
-		if (new_ranges) {
+		if (new_ranges && anchorsSet) {
 			new_ranges = false;
 			nbRanges = beaconRanges.size();
 			if (nbRanges < minNbRanges) {
@@ -184,25 +227,28 @@ int main(int argc, char** argv) {
 				w = Eigen::VectorXf(nbRanges);
 				/// Prepare data
 				for (i=0;i<nbRanges;i++) {
-					id = beaconRanges[i].id.data;
-					y(i) = beaconRanges[i].range.data;
+					id = beaconRanges[i].anchorId;
+					y(i) = beaconRanges[i].range/1000.0f;
 					if (!stds.empty())
-						w(i) = powf(stds[id-1],2.0f);
+						w(i) = powf(stds[i-1],2.0f);
 					else
-						w(i) = powf(beaconRanges[i].std.data, 2.0f);
+						w(i) = powf(0.033f, 2.0f);
+
 					if (!bx.empty())
-						Xi(i,0) = bx[id-1];
+						Xi(i,0) = bx[i-1];
 					else
-						Xi(i,0) = beaconRanges[i].beaconPosition.x;
+						Xi(i,0) = _anchorById[id].x;
+
 					if (!by.empty())
-						Xi(i,1) = by[id-1];
+						Xi(i,1) = by[i-1];
 					else
-						Xi(i,1) = beaconRanges[i].beaconPosition.y;
+						Xi(i,1) = _anchorById[id].y;
+
 					if (dim == 3) {
 						if (!bz.empty())
-							Xi(i,2) = bz[id-1];
+							Xi(i,2) = bz[i-1];
 						else
-							Xi(i,2) = beaconRanges[i].beaconPosition.z;
+							Xi(i,2) = _anchorById[id].z;
 					}
 #ifdef DEBUG
 					cerr << "B" <<  id << ": r=" << y(i) << ", w= " << w(i);
@@ -244,8 +290,21 @@ int main(int argc, char** argv) {
 							marker_msg.header.seq++;
 							marker_msg.header.stamp = ros::Time::now();
 							marker_msg.id++;
-							ptStamped.point.x = x(0);
-							ptStamped.point.y = x(1);
+
+							ptStamped.pose.pose.position.x = x(0);
+							ptStamped.pose.pose.position.y = x(1);
+
+							ptStamped.pose.pose.orientation.x = 0;
+							ptStamped.pose.pose.orientation.y = 0;
+							ptStamped.pose.pose.orientation.z = 0;
+							ptStamped.pose.pose.orientation.w = 0;
+
+							for (int i = 0; i < 36; i++) {
+							ptStamped.pose.covariance[i] = 0;
+							}
+
+
+
 							odom_msg.pose.pose.position.x = x(0);
 							odom_msg.pose.pose.position.y = x(1);
 							marker_msg.pose.position.x = x(0);
@@ -253,12 +312,12 @@ int main(int argc, char** argv) {
 
 							if (dim == 3) {
 								//log_file << "," << x(2);
-								ptStamped.point.z = x(2);
+								ptStamped.pose.pose.position.z = x(2);
 								odom_msg.pose.pose.position.z = x(2);
 								marker_msg.pose.position.z = x(2);
 							}
 							else {
-								ptStamped.point.z = 0;
+								ptStamped.pose.pose.position.z = 0;
 								odom_msg.pose.pose.position.z = 0;
 								marker_msg.pose.position.z = 0;
 							}

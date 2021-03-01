@@ -6,6 +6,7 @@
 #include <Eigen/Eigenvalues>
 
 
+
 bool linearTrilateration(Eigen::VectorXf& y, Eigen::VectorXf& w, Eigen::VectorXf& x, 
 					Eigen::MatrixXf& Xi, Eigen::MatrixXf& C);
 
@@ -14,6 +15,9 @@ Eigen::VectorXf nonlinearTrilateration(Eigen::VectorXf& _x0, Eigen::VectorXf& _y
 
 // TODO: trilateration with RANSAC
 void ransacTrilateration(void);
+
+
+
 
 
 #endif // __TRILATERATION_H__

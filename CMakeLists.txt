@@ -9,7 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   nav_msgs
   visualization_msgs
   roscpp
-  lawnmower
+  gtec_msgs
 )
 
 ## System dependencies are found with CMake's conventions
