@@ -13,5 +13,5 @@ Implementation of different trilateration localization algorithms:
 - Tested and working in simulation using [https://github.com/valentinbarral/gazebosensorplugins](https://github.com/valentinbarral/gazebosensorplugins). 
 
 
-https://user-images.githubusercontent.com/38099967/109551631-155b7180-7ad1-11eb-9b51-e394b99d83fb.mp4
+Trilateration test: https://user-images.githubusercontent.com/38099967/109551631-155b7180-7ad1-11eb-9b51-e394b99d83fb.mp4
 
