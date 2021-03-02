@@ -10,6 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   visualization_msgs
   roscpp
   gtec_msgs
+  tf
 )
 
 ## System dependencies are found with CMake's conventions

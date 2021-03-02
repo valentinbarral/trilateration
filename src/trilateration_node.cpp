@@ -14,6 +14,7 @@
 
 #include <gtec_msgs/Ranging.h>
 #include <visualization_msgs/MarkerArray.h>
+#include <tf/transform_broadcaster.h>
 
 #include "trilateration.h"
 
@@ -37,6 +38,8 @@ using namespace std;
 /// Global variables
 vector<gtec_msgs::Ranging> beaconRanges;
 vector<gtec_msgs::Ranging> lastRanges;
+
+tf::TransformBroadcaster mBroadcaster;
 
 bool new_ranges = false;
 bool anchorsSet = false;
@@ -325,6 +328,12 @@ int main(int argc, char** argv) {
 							pub_ptStamped.publish(ptStamped);
 							pub_odom.publish(odom_msg);
 							pub_marker.publish(marker_msg);
+
+						    mBroadcaster.sendTransform(
+							tf::StampedTransform(
+								tf::Transform(tf::Quaternion(0, 0,0, 1), tf::Vector3(0,0,0)),
+								ptStamped.header.stamp,"world", "map"));
+
 							ct_dist = 0;
 							thresh_dist = thresh_dist0;
 						}
